@@ -1,8 +1,8 @@
 ---
-title: ""
+title: "satisfiesの説明と用途"
 emoji: "🙆"
 type: "tech" # tech: 技術記事 / idea: アイデア
-topics: []
+topics: [typescript]
 published: false
 ---
 
