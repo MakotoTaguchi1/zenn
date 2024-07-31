@@ -3,7 +3,7 @@ title: "Typescript satisfiesの活用シーン"
 emoji: "👮‍♀️"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: [typescript]
-published: false
+published: true
 ---
 
 # はじめに
