@@ -1,5 +1,5 @@
 ---
-title: "satisfiesはどう活用するべきか"
+title: "Typescript satisfiesの活用シーン"
 emoji: "👮"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: [typescript]
@@ -8,18 +8,23 @@ published: false
 
 # はじめに
 
-satisfiesについて、現場でstyleguideに記載があり、コーディングする中で使っています。
-しかしながら、通常の型アノテーションとどう違うのか、どんなシーンで活用すべきなのかあまり把握していなかったので、
+Typescript の `satisfies` 演算子について、現場の styleguide に記載があり、コーディングする中で使っています。
+しかしながら、通常の型注釈とどう違うのか、どんなシーンで活用すべきなのかあまり把握していなかったので、
 自己理解のためにも記事にしてみました。
 
 # satifies について
 
-まず、satisfiesとか何なのか、解説します。
-satisfies は TypeScript 4.9 で追加された型アサーションの一種です。
+まず、`satisfies` とか何なのかを簡単に説明します。
 
-**型アノテーション（型注釈）は型を明示的に指定して上書きするのに対し、satisfies は型付けに加えて、型アサーション（型推論）結果を保ちます。**
+`satisfies` は TypeScript 4.9 で追加された演算子です。
+`式 satisfies 型`のようにして使います。
 
-これはどういうことか、以下の例で示します。
+型注釈との違いとして、
+
+- 型注釈は、型を明示的に上書きするのに対し、
+- `satisfies`は、**型推論結果を保ったまま（つまり完全に上書きをせずに）**、型付けをします。
+
+これはどういうことか以下、例で示します。
 
 ```typescript
 type RGB = [red: number, green: number, blue: number];
@@ -30,7 +35,7 @@ interface Color {
   blue: RGB | string;
 }
 
-// 型注釈
+// 1. 型注釈
 const customColor1: Color = {
   red: [255, 0, 0],
   green: "#00ff00",
@@ -41,7 +46,7 @@ const r1 = customColor1.green.toUpperCase();
 // error: プロパティ 'toUpperCase' は型 'string | RGB' に存在しません。
 // プロパティ 'toUpperCase' は型 'RGB' に存在しません
 
-// satifies
+// 2. satifies
 const customColor2 = {
   red: [255, 0, 0],
   green: "#00ff00",
@@ -51,13 +56,12 @@ const customColor2 = {
 const r2 = customColor2.green.toUpperCase();
 ```
 
-通常の型注釈では green が`string | RGB`と上書きされて、型推論結果が失われます。
-そのため、上記では string にのみ使える`toUpperCase`が使えません。
+1. の型注釈では green が`string | RGB`と上書きされて、型推論結果が失われます。
+   そのため、string にのみ使える`toUpperCase`が使えません。
 
-一方、satisfies では型推論が保たれます。
-greenプロパティの実際の値はstring型なので、その型推論が残り、`toUpperCase`が使えます。
-
-そして、satifsfies では型注釈と同様に、オブジェクトのキーの過不足がチェックされるため、型安全性は変わらず担保されます。
+2. 一方、satisfies では型推論が保たれます。
+   green プロパティの実際の値は string 型なので、その型推論が残り、`toUpperCase`が使えます。
+   かつ、satifsfies は型注釈と同様、オブジェクトのキーの過不足がチェックされるため、型安全性は変わらず担保されます。
 
 # 活用方法
 
@@ -66,7 +70,7 @@ greenプロパティの実際の値はstring型なので、その型推論が残
 テストで使うモックデータの実際の値は決まっています。
 それにもかかわらず、コード上では実際に扱うデータを想定して型付けされているため、少し冗長なコードを書く必要があります。
 
-例えば、以下の関数をテストしたいとします。
+例えば、以下の関数をテストしたいとします。（Jest による単体テスト）
 
 ```typescript
 const sampleFunc = (userName: string) => {
@@ -75,8 +79,8 @@ const sampleFunc = (userName: string) => {
 ```
 
 以下 User 型を用いたモックデータ`user1`を利用する場合、
-sampleFunc は undefined を期待していないため、型アノテーションでモックデータを定義すると
-関数の引数に 非 null アサーション（`!`）をつける必要があります。
+sampleFunc は undefined を期待していないため、型アノテーションでモックデータを定義すると、
+**関数の引数に 非 null アサーション（`!`）をつける必要があります。**
 
 ```typescript
 type User = {
@@ -123,7 +127,7 @@ expect(sampleFunc(user2.name)).toStrictEqual(user2.name);
 
 なぜこれができるのかというと、satisfies では
 
-- 型注釈と同様の型付けの効果により型安全性を担保する
+- 型注釈と同様の型付けの効果（式が型にマッチするかのチェック）により型安全性を担保する
 - かつ、**実際に定義したオブジェクトの型推論結果を保つことができる**ことによって、柔軟性を損なわない
 
 という性質があるからです。
@@ -156,7 +160,7 @@ const names2 = ["makoto", "John", "Taro"] as const;
 ### satisfies と as const の組み合わせ
 
 配列の定数定義で組み合わせた例です。
-colors から型を抽出した MyColor typeの推論結果は string[]ではなく、リテラル型になっています。
+colors から型を抽出した MyColor type の推論結果は string[]ではなく、リテラル型になっています。
 （**もし、satisfies ではなく型注釈を用いた場合は、当然 string[]になってしまいます**）
 
 ```typescript
@@ -174,8 +178,9 @@ https://zenn.dev/tonkotsuboy_com/articles/typescript-as-const-satisfies
 # まとめ
 
 Typescript では、変数が特定の値だけを持つことを保証するために、型注釈が利用されます。
-一方それは、型推論がより具体的な型を導き出す可能性があるのにも関わらず、一般的な型で上書きしてしまうことになります。
-型推論による柔軟性を保持しつつ、型安全性を担保したいシーンで、satisfies の利用を検討してみると良いと思いました。
+**一方それは、型推論がより具体的な型を導き出す可能性があるのにも関わらず、一般的な型で上書きしてしまうことになります。**
+
+型推論の柔軟性を維持しつつ、型安全性を担保したいシーンで、satisfies の利用を検討してみると良いと思いました。
 
 # 参考
 
