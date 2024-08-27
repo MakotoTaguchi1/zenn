@@ -1,5 +1,5 @@
 ---
-title: ""
+title: "Jestのよく使うMacherまとめ"
 emoji: "✨"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: [jest, javascript]
