@@ -1,29 +1,32 @@
 ---
-title: "Dockerでnpmrcをセキュアに扱う"
+title: "Dockerfileで.npmrcをセキュアに扱う【Build secrets】"
 emoji: "🐳"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: [Docker, npm, CI]
-published: false
+published: true
 ---
 
 # 背景
 
-Github Private Packageにnpmパッケージを社内で使用しており、それをnpmインストールする際にアクセストークンとして、.npmrcを使用していました。
-Dockerでの.npmrcの取り合え使いをセキュア化した話について、共有します。
+社内で Github Package でプライベートnpmパッケージを運用しており、それをnpmインストールするためのアクセストークンとして`.npmrc`を使用しています。
+最近、Dockerfileでの.npmrcの取り扱いをセキュア化しました。その過程で少しだけコツと注意がいったので、共有したいと思います。
 
-ちなみに.npmrcについて基本的な情報は、以下の記事がわかりやすかったのでご参照ください。
+ちなみに.npmrcとはなんぞ？ということ本記事では省略します。ご存知なければ以下の記事が分かりやすかったのでご参照ください。
 https://qiita.com/marumaru0113/items/21b600c21caf5d9b9775
 
 # ビフォーアフター
 
 ## Before
 
+ルートディレクトリに.npmrcを配置しておき、pakage.json, package-lock.jsonと共にコピーしてnpm ciしていました。
+ちなみに本題とはそれますが、Dockerfileのベストプラクティスに則り、いきなり`COPY . .`するよりも、この方がDockerのキャッシュが効きやすいため順番を最適化しています。
+
 ```Dockerfile
 ## -- Build Stage
 FROM node:18.20.3 AS build
-
 WORKDIR /usr/src/app
 
+# 本題はここ↓
 COPY package*.json .npmrc .
 RUN npm ci
 COPY . .
@@ -31,20 +34,19 @@ RUN npm run build
 
 ## -- Production Stage
 FROM node:18.20.3
-
 WORKDIR /usr/src/app
 ...COPY系の処理など
-
 CMD [ "node", "dist/main.js" ]
 ```
 
-ただし、これはセキュアな書き方ではないので避けたいです。
-理由としては、.npmrcはプライベートnpmレジストリへのアクセストークンであり秘匿情報なので、Dockerイメージに直接コピーするとイメージレイヤに保存されてしまいます。
-そうなると、`docker history`コマンドなどにより、過去のレイヤーに含まれる.npmrcファイルの内容を確認できてしまう可能性があります。
+**ただし、これはセキュアな書き方ではないので避けたいです。**
+理由は、.npmrcはプライベートnpmレジストリへのアクセストークンであり秘匿情報なので、**Dockerイメージに直接コピーするとイメージレイヤに保存されてしまうからです。**
+そうなると、`docker history`コマンドなどにより、過去のレイヤーに含まれる.npmrcファイルの内容を確認できてしまうことになります。
 
 ## After
 
-最終的に、Dockerfileはこうなりました。
+抜粋ですが最終的にDockerfileはこうなりました。
+.npmrcはCOPYするのではなく、一時的なシークレット情報として引き渡す形になりました。
 
 ```Dockerfile
 COPY package*.json .
@@ -53,8 +55,8 @@ COPY . .
 RUN npm run build
 ```
 
-DockerにはBuild secretというものがあり（知らなかった）、それを使って`Secret mounts`することで、ビルドの間に限り秘匿情報をビルドコンテナ内に引き渡すことができます。
-つまり、Dockerレイヤに残さない形で、.npmrcの情報を利用できます。
+Dockerには `Build Secrets` という機能があり、その機能の一部である`Secret mounts`を利用することで、**ビルドの間に限り秘匿情報をビルドコンテナ内に引き渡す**ことができます。
+**つまり、Dockerレイヤに.npmrcの情報を残さない形で利用できます。**
 
 https://docs.docker.com/build/building/secrets/#secret-mounts
 
@@ -62,8 +64,9 @@ https://docs.docker.com/build/building/secrets/#secret-mounts
 `target`がマウント先のパス・ファイル名になります。
 `dst`, `destination`でも同じ意味で使えます。（[参考](https://docs.docker.jp/storage/bind-mounts.html)）
 
-【注意点】
-そのままだと、COPY . . でローカルに配置している.npmrcがレイヤに乗ってしまうので、以下をdockerignoreに追記してください。
+### 【重要: 注意点】
+そのままだと、`COPY . .` でローカルに配置している.npmrcが結局Dockerレイヤに乗ってしまいます。
+**`.dockerignore`に追記してCOPYされないようにしてください。**
 
 ```.dockerignore
 dist
@@ -72,26 +75,28 @@ node_modules
 ```
 
 
-## ビルド時の受け渡し方
-このnpmrcの内容をシークレットとして利用するには、ビルド時にidを引き渡す必要があります。
-例として、Docker Composeの時と、GithubActionsで利用する場合を示します。
+# ビルド時のシークレットの受け渡し方
+上記により、ビルド時に.npmrcをシークレットとしてセキュアに引き渡せるようになりました。
+次は、実際のビルド時のsecret idの引き渡し方です。
 
-### 注意点
-DockerのBuild Secretを使うには、`BuildKit`というビルダーを使う必要があります。古いDockerエンジンではこれが無効です。
+例として、**Docker Compose**と、**Github Actions**で利用する場合をそれぞれ示します。
 
+:::message
+DockerのBuild Secretを使うには、`BuildKit`というビルダーを使う必要があります。
+古いDockerエンジンではこれが無効です。
 v23.0 以降の Docker Desktop, Docker Engine はデフォルトのビルダーとして BuildKit が使用されています。
-それ以前のバージョンを使用する場合は明示的にBuidKitを有効化する必要があるため、注意してください。
+それ以前のバージョンを使用する場合は明示的にBuidKitを有効化する必要があります。環境によっては注意してください。
+:::
 
+## Docker Composeの場合
 
-### Docker Composeの場合
-
-シンプルに、この形でシークレットを引き渡せます。
+以下の手順です。
 1. ローカルのリポジトリルートに.npmrcファイルを配置。
-2. トップレベルのSecretディレクティブでローカルにある.npmrcファイルを指定。
-3. マウントしたコンテナにて、secrets attributeで指定。
-4. 環境変数で`DOCKER_BUILDKIT: 1`を指定して、明示的に有効化（dockerバージョンは開発者環境によるため）
+2. トップレベルの `secrets` ディレクティブでローカルにある.npmrcファイルの所在地を指定。
+3. Dockerfileを利用するコンテナの `secrets` にて、上記secretを指定。
+4. 環境変数で`DOCKER_BUILDKIT: 1`を指定して、明示的に有効化すると良い（dockerバージョンは開発者環境によるため）
 
-docker-compose.yaml
+docker-compose.yaml（抜粋）
 ```yaml
 services:
   app:
@@ -99,25 +104,27 @@ services:
       context: .
       dockerfile: Dockerfile
       secrets:
-        - npmrc    # シークレットの指定
+        - npmrc  # 3.
     environment:
-      DOCKER_BUILDKIT: 1
+      DOCKER_BUILDKIT: 1  # 4.
 
 secrets:
   npmrc:
-    file: .npmrc  # ローカルの.npmrcファイルのパス
+    file: .npmrc  # 2.
 ```
 
 
-### Github Actionsの場合
+## Github Actionsの場合ß
 
-1. リポジトリシークレットにNPM_TOKENとして保存しておき.npmrcファイルを動的に生成
-2. docker buildコマンドのsecretオプションにて指定
+以下の手順です。
+1. リポジトリシークレットに.npmrcのトークンを`NPM_TOKEN`として保存しておく。
+2. .npmrcファイルを動的に生成。
+3. docker buildコマンドのsecretオプションにて指定。`src`にて先で作った.npmrcのパスを指定できる。
 
 ```yaml
       - name: docker build & push
         run: |
-          echo "engine-strict=true" >> ./.npmrc 
+          echo "engine-strict=true" >> ./.npmrcß
           echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" >> ./.npmrc
           docker --version
           docker build --secret id=npmrc,src=.npmrc --pull -t ${GAR_REPO}:${{ env.COMMIT_SHA }} .
@@ -126,14 +133,15 @@ secrets:
 
 【補足】
 GihubActionsのubuntu-latestランナーでは、デフォルトでDockerがインストールされています。
-実際にワークフロー実行して確認したところ、Dockerバージョンは26.1.3でした。（2024年12月現在）
-v23より新しいので、BuildKitはデフォルトで有効になっており明示的な有効化不要です。
-気になるようでしたら、念のため`docker --version`で確認しておくと良いと思います。
+実際にワークフロー実行して確認したところ、Dockerバージョンは 26.1.3 でした。（2024年12月現在）
+v23.0より新しいので、BuildKitはデフォルトで有効になっています。そのためここでは明示的に有効化しませんでした。
+一応、ワークフローに`docker --version`を書いておくと良いです。
 
 
 # 参考
 
-- https://zenn.dev/tksx1227/articles/4af1ce9b9e475a
-- https://qiita.com/taquaki-satwo/items/f8fbe8b1efc4b2323ae7#7-%E3%82%B9%E3%83%86%E3%83%83%E3%83%97%E3%81%AE%E9%A0%86%E7%95%AA%E3%82%92%E6%9C%80%E9%81%A9%E5%8C%96%E3%81%99%E3%82%8B
+https://zenn.dev/tksx1227/articles/4af1ce9b9e475a
+
+https://qiita.com/taquaki-satwo/items/f8fbe8b1efc4b2323ae7#7-%E3%82%B9%E3%83%86%E3%83%83%E3%83%97%E3%81%AE%E9%A0%86%E7%95%AA%E3%82%92%E6%9C%80%E9%81%A9%E5%8C%96%E3%81%99%E3%82%8B
 
 
