@@ -4,12 +4,18 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "format": "prettier --write \"articles/**/*.md\"",
+    "format:article": "prettier --write",
+    "format:check": "prettier --check \"articles/**/*.md\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "zenn-cli": "^0.1.158"
+    "zenn-cli": "^0.5.3"
+  },
+  "devDependencies": {
+    "prettier": "2.8.8"
   }
 }
